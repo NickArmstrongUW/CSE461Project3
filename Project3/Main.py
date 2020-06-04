@@ -35,70 +35,67 @@ def main():
         try:
             connection, address = sock.accept() # not able to handle multiple clients
             thread = threading.Thread(target=run, args=[connection, address])
+            thread.daemon=True
             thread.start()
         except socket.timeout: 
-            pass # or continue
-            # socket.close()
-            # sys.exit()
+            break
     sock.close()
 
 def run(connection, address):
     # connection is client socket
-
-
-    
+    # read in the header
     try:
-        # read in the header
         header = connection.recv(1)
         while '\r\n\r\n' not in str(header):
             header += connection.recv(1)
-
-        # get HTTP request
-        headers = header.split('\r\n')
-        fprint(">>> " + headers[0])
-        fields = headers[0].split()
-
-        # set up socket obj that connects to server
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.settimeout(10)
-        # getting host and port
-        url_port = fields[1].split(':')
-        port = 80
-        if url_port[-1].isdigit(): # port is the last index then
-            port = url_port[-1]
-            url = ""
-            for i in range(0, len(url_port) - 1):
-                url += url_port[i] + ":"
-            url = url[:-1]
-        else: # check if port was given in the Host line and set url
-            url = fields[1]
-            for line in headers:
-                if 'host:' in line.lower():
-                    fields = line.split()
-                    url_port = fields[1].split(':')
-                    if url_port[-1].isdigit(): # port is the last index then
-                        port = url_port[-1]
-                    break
-            if 'https' in url: # still don't find port
-                port = 443
-        port = int(port)
-        
-        if '//' in url:
-            url = url.split('//')[1]
-        if url[-1] is '/':
-            url = url[:-1]
-
-        HOST = socket.gethostbyname(url)
-        server.connect((HOST, port))
-
-        if 'CONNECT' in fields[0]:
-            handle_connection(connection, address, server, HOST, port)
-        else:
-            handle_nonconnection(connection, address, header, server, HOST, port)
-        
-    except Exception as e:
+    except socket.error:
         return
+
+    # get HTTP request
+    headers = header.split('\r\n')
+    fprint(">>> " + headers[0])
+    fields = headers[0].split()
+
+    # set up socket obj that connects to server
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.settimeout(10)
+    # getting host and port
+    url_port = fields[1].split(':')
+    port = 80
+    if url_port[-1].isdigit(): # port is the last index then
+        port = url_port[-1]
+        url = ""
+        for i in range(0, len(url_port) - 1):
+            url += url_port[i] + ":"
+        url = url[:-1]
+    else: # check if port was given in the Host line and set url
+        url = fields[1]
+        for line in headers:
+            if 'host:' in line.lower():
+                fields = line.split()
+                url_port = fields[1].split(':')
+                if url_port[-1].isdigit(): # port is the last index then
+                    port = url_port[-1]
+                break
+        if 'https' in url: # still don't find port
+            port = 443
+    port = int(port)
     
+    if '//' in url:
+        url = url.split('//')[1]
+    if url[-1] is '/':
+        url = url[:-1]
+
+    try: 
+        HOST = socket.gethostbyname(url)
+    except socket.error:
+        return
+    server.connect((HOST, port))
+
+    if 'CONNECT' in fields[0]:
+        handle_connection(connection, address, server, HOST, port)
+    else:
+        handle_nonconnection(connection, address, header, server, HOST, port)  
     server.close()
     
 
@@ -112,6 +109,8 @@ def handle_connection(connection, address, server, server_ip, port):
     try:
         message = "HTTP/1.0 200 OK \r\n\r\n" # double carriage return
         connection.sendto(message, address)
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         message = "HTTP/1.0 502 Bad Gateway \r\n\r\n" # double carriage return
         connection.sendto(message, address)
@@ -126,6 +125,8 @@ def handle_connection(connection, address, server, server_ip, port):
         client2serv = threading.Thread(target=forward_information, args=[connection, server,  (server_ip, port)])
         client2serv.start()
         forward_information(server, connection, address)
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         server.close()
         return
@@ -140,15 +141,15 @@ def forward_information(host, client, address):
         try:
             d_in = host.recv(1024)
             client.sendall(d_in)
-        except socket.timeout:
-            return
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except socket.error:# as e:
             continue
         
 
 # filter out keep alive (turn to close)
 # fwd header, payload to server
-        # fwd server resp to client
+# fwd server resp to client
 def handle_nonconnection(connection, address, header, server, server_ip, port):
     # filter out keep alive (turn to close)
     new_request = process_header(header)
@@ -163,8 +164,9 @@ def handle_nonconnection(connection, address, header, server, server_ip, port):
             data = server.recv(1024)
             if len(data) == 0:
                 break
-            # proc_response = process_header(data)
             connection.sendall(data)
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except socket.timeout:
             break
     
