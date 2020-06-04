@@ -68,6 +68,7 @@ def run(connection, address):
         #what is client?
 
     print("entered run")
+    
     try:
         # read in the header
         header = connection.recv(1)
@@ -160,12 +161,25 @@ def handle_connection(connection, address, server, server_ip, port):
     except Exception:
         server.close()
         return
+    
+    server.close()
+    return
 
 # helper for handle connection
-def forward_information(input, output, address):
+def forward_information(host, client, address):
+    host.setblocking(0)
     while True:
-        d_in = input.recv(1024)
-        output.sendall(d_in)
+        try:
+            d_in = host.recv(1024)
+        except socket.error as e:
+            print("finished connection on recv with error ", e)
+            return
+        try:
+            client.sendall(d_in)
+        except socket.error as e:
+            print("finished connection on send with error ", e)
+            return
+        
 
 # filter out keep alive (turn to close)
 # fwd header, payload to server
