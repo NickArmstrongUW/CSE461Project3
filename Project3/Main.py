@@ -9,10 +9,11 @@ import re
 
 DEFAULT_PORT = 1234
 
+# formated print for the server output
 def fprint(data):
     now = datetime.now()
-    print("%s %s %s - " % (now.strftime("%-d"), 
-        now.strftime("%b"), now.strftime("%H:%M:%S")), data)
+    print("%s %s %s - %s" % (now.strftime("%-d"), 
+        now.strftime("%b"), now.strftime("%H:%M:%S"), data))
 
 def main():
     # create a connection?
@@ -44,30 +45,7 @@ def main():
 def run(connection, address):
     # connection is client socket
 
-        # connection is probably a socket to the client just use that
-        # IF CONNECTION IS NOT A SOCKET use connection and addr to get a sock for client
-        # to read in header
-            # some sort obj that you keep adding bytes to as they come in
-            # loop terminate cond \r\n\r\n
 
-        # after reading in header, next data in socket is payload
-        # setup a socket obj that connects to the server
-        # find if it is connect or not
-            # if not connect
-                # filter out keep alive (turn to close)
-                # fwd header, payload to server
-                # fwd server resp to client
-            # if is connect
-                # send back that HTTP ok to client
-                # create 2 thds:
-                    # 1 thd forwards all traffic server to client
-                    # 1 thd forwards all traffic client to server
-                # typically these two thds finish running with a crazy amount of exceptions since one of the connection was closed
-        # close the sockets
-
-        #what is client?
-
-    print("entered run")
     
     try:
         # read in the header
@@ -75,15 +53,10 @@ def run(connection, address):
         while '\r\n\r\n' not in str(header):
             header += connection.recv(1)
 
-        try:
-            headers = header.split('\r\n')
-        except TypeError:
-            print("headers failed at: ", headers)
-        fprint(headers[0])
-        try:
-            fields = headers[0].split()
-        except TypeError:
-            print("fields failed at: ", headers[0])
+        # get HTTP request
+        headers = header.split('\r\n')
+        fprint(">>> " + headers[0])
+        fields = headers[0].split()
 
         # set up socket obj that connects to server
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -109,17 +82,14 @@ def run(connection, address):
             if 'https' in url: # still don't find port
                 port = 443
         port = int(port)
-        print("port is: ", port)
         
         if '//' in url:
             url = url.split('//')[1]
         if url[-1] is '/':
             url = url[:-1]
-        print("url is: ", url)
+
         HOST = socket.gethostbyname(url)
-        print("HOST is: ", HOST)
         server.connect((HOST, port))
-        print("server has connected", (HOST, port))
 
         if 'CONNECT' in fields[0]:
             handle_connection(connection, address, server, HOST, port)
@@ -127,7 +97,6 @@ def run(connection, address):
             handle_nonconnection(connection, address, header, server, HOST, port)
         
     except Exception as e:
-        print("exception ", e)
         return
     
     server.close()
@@ -139,7 +108,6 @@ def run(connection, address):
     # 1 thd forwards all traffic client to server
 # typically these two thds finish running with a crazy amount of exceptions since one of the connection was closed
 def handle_connection(connection, address, server, server_ip, port):
-    print("handling connection")
     # send back that HTTP ok to client
     try:
         message = "HTTP/1.0 200 OK \r\n\r\n" # double carriage return
@@ -171,21 +139,17 @@ def forward_information(host, client, address):
     while True:
         try:
             d_in = host.recv(1024)
-        except socket.error as e:
-            print("finished connection on recv with error ", e)
-            return
-        try:
             client.sendall(d_in)
-        except socket.error as e:
-            print("finished connection on send with error ", e)
+        except socket.timeout:
             return
+        except socket.error:# as e:
+            continue
         
 
 # filter out keep alive (turn to close)
 # fwd header, payload to server
         # fwd server resp to client
 def handle_nonconnection(connection, address, header, server, server_ip, port):
-    print("handling nonconnection")
     # filter out keep alive (turn to close)
     new_request = process_header(header)
     
@@ -208,23 +172,34 @@ def handle_nonconnection(connection, address, header, server, server_ip, port):
     
 
 def process_header(header):
-    print("original header is", header)
     new_header = header
     new_header = new_header.replace('keep-alive', 'close')
     new_header = new_header.replace('HTTP/1.1', 'HTTP/1.0')
-    # new_header
-    # headers = header.split('\r\n')
-    # fprint(headers[0])
-    # new_request = ""
-    # for i in range(len(headers)):
-    #     headers[i].replace('keep-alive', 'close')
-    #     #HTTP/#.#
-    #     # headers[i] = headers[i][:headers[i].find('HTTP/')] + 'HTTP/1.0'        
-    #     new_request = new_request + headers[i] + '\r\n'
-
-    print("new_request is: ", new_header)
     return new_header
 
 
 if __name__ == '__main__':
     main()
+
+
+
+        # connection is probably a socket to the client just use that
+        # IF CONNECTION IS NOT A SOCKET use connection and addr to get a sock for client
+        # to read in header
+            # some sort obj that you keep adding bytes to as they come in
+            # loop terminate cond \r\n\r\n
+
+        # after reading in header, next data in socket is payload
+        # setup a socket obj that connects to the server
+        # find if it is connect or not
+            # if not connect
+                # filter out keep alive (turn to close)
+                # fwd header, payload to server
+                # fwd server resp to client
+            # if is connect
+                # send back that HTTP ok to client
+                # create 2 thds:
+                    # 1 thd forwards all traffic server to client
+                    # 1 thd forwards all traffic client to server
+                # typically these two thds finish running with a crazy amount of exceptions since one of the connection was closed
+        # close the sockets
