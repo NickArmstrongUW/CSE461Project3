@@ -5,6 +5,7 @@ import sys
 import socket
 from random import randint
 from datetime import datetime
+import re
 
 DEFAULT_PORT = 1234
 
@@ -22,6 +23,7 @@ def main():
     
     # setup our socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(10)
     # ip = socket.gethostbyname("localhost")
     # create socket, bind, listen, accept
     sock.bind(("0.0.0.0", port))
@@ -41,8 +43,6 @@ def main():
 
 def run(connection, address):
     # connection is client socket
-    print("entered run")
-    try:
 
         # connection is probably a socket to the client just use that
         # IF CONNECTION IS NOT A SOCKET use connection and addr to get a sock for client
@@ -66,29 +66,61 @@ def run(connection, address):
         # close the sockets
 
         #what is client?
-        
+
+    print("entered run")
+    try:
         # read in the header
         header = connection.recv(1)
         while '\r\n\r\n' not in str(header):
             header += connection.recv(1)
 
-        headers = header.split('\r\n')
+        try:
+            headers = header.split('\r\n')
+        except TypeError:
+            print("headers failed at: ", headers)
         fprint(headers[0])
-        fields = headers[0].split()
+        try:
+            fields = headers[0].split()
+        except TypeError:
+            print("fields failed at: ", headers[0])
 
         # set up socket obj that connects to server
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.settimeout(10)
+        # getting host and port
+        url_port = fields[1].split(':')
+        port = 80
+        if url_port[-1].isdigit(): # port is the last index then
+            port = url_port[-1]
+            url = ""
+            for i in range(0, len(url_port) - 1):
+                url += url_port[i] + ":"
+            url = url[:-1]
+        else: # check if port was given in the Host line and set url
+            url = fields[1]
+            for header in headers:
+                if 'host:' in header.lower():
+                    fields = header.split()
+                    url_port = fields[1].split(':')
+                    if url_port[-1].isdigit(): # port is the last index then
+                        port = url_port[-1]
+                    break
+            if 'https' in url: # still don't find port
+                port = 443
 
-        # getting host
-        HOST = socket.gethostbyname(str(fields[1]))
-        print("Host is ", HOST)
-        server.connect((HOST, 80))
-        print("server has connected")
+        print("port is: ", port)
+        port = int(port)
+        url = url.split('//')[1][:-1]
+        print("url is: ", url)
+        HOST = socket.gethostbyname(url)
+        print("HOST is: ", HOST)
+        server.connect((HOST, port))
+        print("server has connected", (HOST, port))
 
-        if fields[0] is 'CONNECT':
-            handle_connection(connection, address, server, HOST)
+        if 'CONNECT' in fields[0]:
+            handle_connection(connection, address, server, HOST, port)
         else:
-            handle_nonconnection(connection, address, header, server, HOST)
+            handle_nonconnection(connection, address, header, server, HOST, port)
         
     except Exception as e:
         print("exception ", e)
@@ -102,15 +134,15 @@ def run(connection, address):
     # 1 thd forwards all traffic server to client
     # 1 thd forwards all traffic client to server
 # typically these two thds finish running with a crazy amount of exceptions since one of the connection was closed
-def handle_connection(connection, address, server, server_ip):
+def handle_connection(connection, address, server, server_ip, port):
     print("handling connection")
     # send back that HTTP ok to client
     try:
         message = "HTTP/1.0 200 OK \r\n\r\n" # double carriage return
-        connection.sendto(message)
+        connection.sendto(message, address)
     except Exception:
         message = "HTTP/1.0 502 Bad Gateway \r\n\r\n" # double carriage return
-        connection.sendto(message)
+        connection.sendto(message, address)
         server.close()
         return
     
@@ -119,40 +151,62 @@ def handle_connection(connection, address, server, server_ip):
         # 1 thd forwards all traffic client to server
          # typically these two thds finish running with a crazy amount of exceptions since one of the connection was closed
     try:
-        client2serv = thread.Thread(target=forward_information, args=[connection, server,  (server_ip, 80)])
+        client2serv = threading.Thread(target=forward_information, args=[connection, server,  (server_ip, port)])
+        client2serv.start()
         forward_information(server, connection, address)
     except Exception:
         server.close()
         return
 
-
+# helper for handle connection
 def forward_information(input, output, address):
     while True:
         d_in = input.recv(1024)
-        output.sendto(d_in, address)
+        output.sendall(d_in)
 
 # filter out keep alive (turn to close)
 # fwd header, payload to server
         # fwd server resp to client
-def handle_nonconnection(connection, address, header, server, server_ip):
+def handle_nonconnection(connection, address, header, server, server_ip, port):
     print("handling nonconnection")
     # filter out keep alive (turn to close)
-    split_header = header.split(delimeter='\r\n')
-    keep_alive = header.find('keep-alive')
-    new_request = ""
-    if keep_alive == -1:
-        # keep alive is not in it, so new request is the same
-        new_request = header
-    else:
-        # replace keep-alive with close
-        new_request = header[0: keep_alive] + 'close' + header[keep_alive + 10:]
+    new_request = process_header(header)
+    
+    # forward modified header to server
+    server.sendall(new_request)
+    
+    # receive data from server until they stop sending
+    server.settimeout(10)
+    while True:
+        try: 
+            data = server.recv(1024)
+            if len(data) == 0:
+                break
+            # proc_response = process_header(data)
+            connection.sendall(data)
+        except socket.timeout:
+            break
+    
+    # process data from server, then send to client
+    
 
-    # fwd header, payload to server
-    # fwd server resp to client
-    server.sendto(header, (server_ip, 80))
-    server.sendto(new_request, (server_ip, 80))
-    data = server.recv(1024)
-    connection.sendto(data, address)
+def process_header(header):
+    print("original header is", header)
+    new_header = header
+    new_header = new_header.replace('keep-alive', 'close')
+    new_header = new_header.replace('HTTP/1.1', 'HTTP/1.0')
+    # new_header
+    # headers = header.split('\r\n')
+    # fprint(headers[0])
+    # new_request = ""
+    # for i in range(len(headers)):
+    #     headers[i].replace('keep-alive', 'close')
+    #     #HTTP/#.#
+    #     # headers[i] = headers[i][:headers[i].find('HTTP/')] + 'HTTP/1.0'        
+    #     new_request = new_request + headers[i] + '\r\n'
+
+    print("new_request is: ", new_header)
+    return new_header
 
 
 if __name__ == '__main__':
