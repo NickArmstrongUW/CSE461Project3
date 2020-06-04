@@ -167,7 +167,7 @@ def handle_connection(connection, address, server, server_ip, port):
 
 # helper for handle connection
 def forward_information(host, client, address):
-    host.setblocking(0)
+    host.setblocking(1)
     while True:
         try:
             d_in = host.recv(1024)
