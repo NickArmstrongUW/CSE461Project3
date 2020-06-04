@@ -98,19 +98,22 @@ def run(connection, address):
             url = url[:-1]
         else: # check if port was given in the Host line and set url
             url = fields[1]
-            for header in headers:
-                if 'host:' in header.lower():
-                    fields = header.split()
+            for line in headers:
+                if 'host:' in line.lower():
+                    fields = line.split()
                     url_port = fields[1].split(':')
                     if url_port[-1].isdigit(): # port is the last index then
                         port = url_port[-1]
                     break
             if 'https' in url: # still don't find port
                 port = 443
-
-        print("port is: ", port)
         port = int(port)
-        url = url.split('//')[1][:-1]
+        print("port is: ", port)
+        
+        if '//' in url:
+            url = url.split('//')[1]
+        if url[-1] is '/':
+            url = url[:-1]
         print("url is: ", url)
         HOST = socket.gethostbyname(url)
         print("HOST is: ", HOST)
